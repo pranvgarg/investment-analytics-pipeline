@@ -1,0 +1,305 @@
+"""
+Daily Portfolio Refresh DAG
+Orchestrates the complete investment analytics pipeline
+"""
+from datetime import datetime, timedelta
+import sys
+import os
+
+# Add the src directory to the Python path
+sys.path.insert(0, '/opt/airflow/src')
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.operators.bash import BashOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+from src.data_ingestion.market_data_api import MarketDataConnector
+from src.data_ingestion.portfolio_connector import PortfolioConnector
+from src.data_ingestion.data_quality import DataQualityChecker
+from src.database.connection import get_db_connection
+
+# DAG configuration
+default_args = {
+    'owner': 'data-team',
+    'depends_on_past': False,
+    'start_date': datetime(2024, 1, 1),
+    'email_on_failure': True,
+    'email_on_retry': False,
+    'retries': 2,
+    'retry_delay': timedelta(minutes=5),
+    'execution_timeout': timedelta(hours=1)
+}
+
+dag = DAG(
+    'daily_portfolio_refresh',
+    default_args=default_args,
+    description='Daily portfolio data refresh and analytics pipeline',
+    schedule_interval='0 9 * * 1-5',  # 9 AM weekdays (after market open)
+    catchup=False,
+    max_active_runs=1,
+    tags=['portfolio', 'analytics', 'daily']
+)
+
+def extract_portfolio_symbols(**context):
+    """Extract unique symbols from portfolio holdings"""
+    try:
+        db = get_db_connection()
+        symbols_query = "SELECT DISTINCT symbol FROM raw_portfolio_holdings WHERE shares > 0"
+        result = db.execute_query(symbols_query)
+        symbols = result['symbol'].tolist()
+        
+        if not symbols:
+            symbols = ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'NVDA', 'META', 'NFLX']  # Default symbols
+        
+        context['task_instance'].xcom_push(key='portfolio_symbols', value=symbols)
+        print(f"Extracted {len(symbols)} portfolio symbols: {symbols}")
+        
+    except Exception as e:
+        print(f"Error extracting portfolio symbols: {e}")
+        raise
+
+def extract_market_data(**context):
+    """Extract market data for portfolio symbols"""
+    try:
+        # Get symbols from previous task
+        symbols = context['task_instance'].xcom_pull(key='portfolio_symbols', task_ids='extract_portfolio_symbols')
+        
+        if not symbols:
+            raise ValueError("No symbols found from portfolio extraction")
+        
+        # Initialize market data connector
+        market_connector = MarketDataConnector()
+        
+        # Fetch current market prices
+        price_data = market_connector.get_stock_prices(symbols)
+        
+        if price_data.empty:
+            raise ValueError("No market data received")
+        
+        # Add additional columns for database
+        price_data['source'] = 'yahoo_finance'
+        price_data['volume'] = None  # Will be populated in production
+        price_data['open_price'] = None
+        price_data['high_price'] = None
+        price_data['low_price'] = None
+        price_data['close_price'] = price_data['price']
+        price_data['adjusted_close'] = price_data['price']
+        
+        # Insert data into database
+        db = get_db_connection()
+        db.insert_dataframe(price_data, 'raw_market_data', if_exists='append')
+        
+        print(f"Successfully inserted {len(price_data)} market data records")
+        return len(price_data)
+        
+    except Exception as e:
+        print(f"Error in market data extraction: {e}")
+        raise
+
+def update_portfolio_holdings(**context):
+    """Update portfolio holdings from data source"""
+    try:
+        # Initialize portfolio connector
+        portfolio_connector = PortfolioConnector(data_source="sample")
+        
+        # Get current holdings
+        holdings_data = portfolio_connector.get_holdings()
+        
+        if holdings_data.empty:
+            raise ValueError("No portfolio holdings data received")
+        
+        # Validate data quality
+        if not portfolio_connector.validate_data(holdings_data, "holdings"):
+            raise ValueError("Portfolio holdings failed validation")
+        
+        # Update database (replace existing holdings)
+        db = get_db_connection()
+        
+        # Clear existing holdings and insert new ones
+        db.execute_statement("DELETE FROM raw_portfolio_holdings")
+        db.insert_dataframe(holdings_data, 'raw_portfolio_holdings', if_exists='append')
+        
+        print(f"Successfully updated {len(holdings_data)} portfolio holdings")
+        return len(holdings_data)
+        
+    except Exception as e:
+        print(f"Error updating portfolio holdings: {e}")
+        raise
+
+def extract_transaction_data(**context):
+    """Extract recent transaction data"""
+    try:
+        # Initialize portfolio connector
+        portfolio_connector = PortfolioConnector(data_source="sample")
+        
+        # Get recent transactions (last 30 days)
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=30)
+        
+        transaction_data = portfolio_connector.get_transactions(
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat()
+        )
+        
+        if transaction_data.empty:
+            print("No recent transactions found")
+            return 0
+        
+        # Validate data quality
+        if not portfolio_connector.validate_data(transaction_data, "transactions"):
+            raise ValueError("Transaction data failed validation")
+        
+        # Insert into database (append new transactions)
+        db = get_db_connection()
+        db.insert_dataframe(transaction_data, 'raw_transactions', if_exists='append')
+        
+        print(f"Successfully inserted {len(transaction_data)} transaction records")
+        return len(transaction_data)
+        
+    except Exception as e:
+        print(f"Error in transaction data extraction: {e}")
+        # Don't fail the entire pipeline for transaction errors
+        print("Continuing pipeline without transaction data")
+        return 0
+
+def run_data_quality_checks(**context):
+    """Run comprehensive data quality checks"""
+    try:
+        dag_run_id = context['dag_run'].run_id
+        task_id = context['task'].task_id
+        
+        # Initialize data quality checker
+        checker = DataQualityChecker()
+        
+        # Run all quality checks
+        results = checker.run_all_checks(dag_run_id=dag_run_id, task_id=task_id)
+        
+        # Log results
+        print(f"Data Quality Summary:")
+        print(f"Overall Score: {results['overall_score']:.1f}%")
+        print(f"Checks Passed: {results['passed_checks']}/{results['total_checks']}")
+        
+        for check_name, check_result in results['individual_results'].items():
+            status = "PASSED" if check_result['passed'] else "FAILED"
+            accuracy = check_result['accuracy']
+            print(f"  {check_name}: {status} ({accuracy:.1f}% accuracy)")
+        
+        # Store results in XCom for downstream tasks
+        context['task_instance'].xcom_push(key='quality_results', value=results)
+        
+        # Fail task if overall quality is too low
+        if results['overall_score'] < 60:  # 60% minimum quality threshold
+            raise ValueError(f"Data quality too low: {results['overall_score']:.1f}%")
+        
+        return results['overall_score']
+        
+    except Exception as e:
+        print(f"Error in data quality checks: {e}")
+        raise
+
+def record_pipeline_run(**context):
+    """Record pipeline execution metadata"""
+    try:
+        dag_run_id = context['dag_run'].run_id
+        
+        # Get data from previous tasks
+        market_records = context['task_instance'].xcom_pull(task_ids='extract_market_data') or 0
+        holdings_records = context['task_instance'].xcom_pull(task_ids='update_portfolio_holdings') or 0
+        transaction_records = context['task_instance'].xcom_pull(task_ids='extract_transaction_data') or 0
+        quality_score = context['task_instance'].xcom_pull(task_ids='data_quality_check') or 0
+        
+        total_records = market_records + holdings_records + transaction_records
+        
+        # Insert pipeline run record
+        db = get_db_connection()
+        insert_query = """
+        INSERT INTO pipeline_runs 
+        (dag_id, run_id, task_id, start_time, end_time, status, records_processed)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        db.execute_statement(insert_query, {
+            'dag_id': 'daily_portfolio_refresh',
+            'run_id': dag_run_id,
+            'task_id': 'pipeline_summary',
+            'start_time': context['data_interval_start'],
+            'end_time': datetime.now(),
+            'status': 'SUCCESS',
+            'records_processed': total_records
+        })
+        
+        print(f"Pipeline completed successfully:")
+        print(f"  Market data records: {market_records}")
+        print(f"  Portfolio holdings: {holdings_records}")
+        print(f"  Transaction records: {transaction_records}")
+        print(f"  Data quality score: {quality_score:.1f}%")
+        print(f"  Total records processed: {total_records}")
+        
+    except Exception as e:
+        print(f"Error recording pipeline run: {e}")
+        # Don't fail the pipeline for logging errors
+        pass
+
+# Define tasks
+extract_symbols = PythonOperator(
+    task_id='extract_portfolio_symbols',
+    python_callable=extract_portfolio_symbols,
+    dag=dag,
+    doc_md="Extract unique symbols from current portfolio holdings"
+)
+
+extract_market = PythonOperator(
+    task_id='extract_market_data',
+    python_callable=extract_market_data,
+    dag=dag,
+    doc_md="Fetch current market prices for portfolio symbols"
+)
+
+update_holdings = PythonOperator(
+    task_id='update_portfolio_holdings',
+    python_callable=update_portfolio_holdings,
+    dag=dag,
+    doc_md="Update current portfolio holdings from data source"
+)
+
+extract_transactions = PythonOperator(
+    task_id='extract_transaction_data',
+    python_callable=extract_transaction_data,
+    dag=dag,
+    doc_md="Extract recent transaction history"
+)
+
+quality_check = PythonOperator(
+    task_id='data_quality_check',
+    python_callable=run_data_quality_checks,
+    dag=dag,
+    doc_md="Run comprehensive data quality validation"
+)
+
+dbt_run = BashOperator(
+    task_id='dbt_transform',
+    bash_command='cd /opt/airflow/dbt && dbt run --profiles-dir . --target dev',
+    dag=dag,
+    doc_md="Transform raw data using dbt models"
+)
+
+dbt_test = BashOperator(
+    task_id='dbt_test',
+    bash_command='cd /opt/airflow/dbt && dbt test --profiles-dir . --target dev',
+    dag=dag,
+    doc_md="Run dbt data tests"
+)
+
+record_run = PythonOperator(
+    task_id='record_pipeline_run',
+    python_callable=record_pipeline_run,
+    dag=dag,
+    doc_md="Record pipeline execution metadata"
+)
+
+# Set task dependencies
+extract_symbols >> [extract_market, update_holdings, extract_transactions]
+[extract_market, update_holdings, extract_transactions] >> quality_check
+quality_check >> dbt_run >> dbt_test >> record_run

@@ -1,0 +1,72 @@
+name: 'investment_analytics'
+version: '1.0.0'
+config-version: 2
+
+# This setting configures which "profile" dbt uses for this project.
+profile: 'investment_analytics'
+
+# These configurations specify where dbt should look for different types of files.
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"  # directory which will store compiled SQL files
+clean-targets:         # directories to be removed by `dbt clean`
+  - "target"
+  - "dbt_packages"
+
+# Configuring models
+models:
+  investment_analytics:
+    # Config indicated by + and applies to all files under models/staging/
+    staging:
+      +materialized: view
+      +docs:
+        node_color: "#ffb347"
+    
+    # Config for models in the intermediate directory
+    intermediate:
+      +materialized: view
+      +docs:
+        node_color: "#87ceeb"
+    
+    # Config for models in the marts directory
+    marts:
+      +materialized: table
+      +docs:
+        node_color: "#98fb98"
+
+# Test configurations
+tests:
+  +store_failures: true
+  +severity: warn
+
+# Snapshot configurations
+snapshots:
+  investment_analytics:
+    +target_schema: snapshots
+
+# Variables for the project
+vars:
+  # Portfolio configuration
+  risk_free_rate: 0.05
+  benchmark_symbol: 'SPY'
+  
+  # Data quality thresholds
+  freshness_threshold_hours: 24
+  price_validity_min: 0.01
+  price_validity_max: 50000
+  
+  # Date ranges
+  lookback_years: 2
+  min_transaction_date: '2020-01-01'
+
+# Hooks
+on-run-start:
+  - "{{ logging.log_info('Starting dbt run for investment analytics') }}"
+
+on-run-end:
+  - "{{ logging.log_info('Completed dbt run for investment analytics') }}"

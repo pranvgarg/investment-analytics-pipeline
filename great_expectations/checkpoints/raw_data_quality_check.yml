@@ -1,0 +1,140 @@
+name: raw_data_quality_check
+config_version: 1.0
+
+template_name: ~
+
+module_name: great_expectations.checkpoint
+class_name: Checkpoint
+
+run_name_template: "%Y%m%d-%H%M%S-raw-data-validation"
+
+validations:
+  - batch_request:
+      datasource_name: postgres_raw_data
+      data_connector_name: default_runtime_data_connector
+      data_asset_name: raw_market_data
+      runtime_parameters:
+        query: "SELECT * FROM raw_market_data WHERE timestamp >= CURRENT_DATE - INTERVAL '1 day'"
+      batch_identifiers:
+        default_identifier_name: raw_market_data_daily
+    expectation_suite_name: raw_market_data_suite
+
+  - batch_request:
+      datasource_name: postgres_raw_data
+      data_connector_name: default_runtime_data_connector
+      data_asset_name: raw_portfolio_holdings
+      runtime_parameters:
+        query: "SELECT * FROM raw_portfolio_holdings WHERE shares > 0"
+      batch_identifiers:
+        default_identifier_name: raw_portfolio_holdings_active
+    expectation_suite_name: raw_portfolio_holdings_suite
+
+  - batch_request:
+      datasource_name: postgres_raw_data
+      data_connector_name: default_runtime_data_connector
+      data_asset_name: raw_transactions
+      runtime_parameters:
+        query: "SELECT * FROM raw_transactions WHERE transaction_date >= CURRENT_DATE - INTERVAL '30 days'"
+      batch_identifiers:
+        default_identifier_name: raw_transactions_recent
+    expectation_suite_name: raw_transactions_suite
+
+action_list:
+  - name: store_validation_result
+    action:
+      class_name: StoreValidationResultAction
+  - name: store_evaluation_params
+    action:
+      class_name: StoreEvaluationParametersAction
+  - name: update_data_docs
+    action:
+      class_name: UpdateDataDocsAction
+      site_names:
+        - local_site
+  - name: notify_on_failure
+    action:
+      class_name: SlackNotificationAction
+      slack_webhook: ${SLACK_WEBHOOK_URL}
+      notify_on: failure
+      renderer:
+        module_name: great_expectations.render.renderer.slack_renderer
+        class_name: SlackRenderer
+
+evaluation_parameters: {}
+
+runtime_configuration: {}
+
+# Expectation suite configuration
+expectation_suites:
+  raw_market_data_suite:
+    expectations:
+      - expectation_type: expect_table_row_count_to_be_between
+        kwargs:
+          min_value: 1
+          max_value: 10000
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: symbol
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: price
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: price
+          min_value: 0.01
+          max_value: 100000
+      - expectation_type: expect_column_values_to_be_of_type
+        kwargs:
+          column: timestamp
+          type_: timestamp
+      - expectation_type: expect_column_values_to_be_dateutil_parseable
+        kwargs:
+          column: timestamp
+
+  raw_portfolio_holdings_suite:
+    expectations:
+      - expectation_type: expect_table_row_count_to_be_between
+        kwargs:
+          min_value: 1
+          max_value: 1000
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: symbol
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: shares
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: shares
+          min_value: 0
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: avg_cost
+          min_value: 0.01
+          max_value: 100000
+      - expectation_type: expect_column_values_to_match_regex
+        kwargs:
+          column: symbol
+          regex: "^[A-Z]{1,5}$"
+
+  raw_transactions_suite:
+    expectations:
+      - expectation_type: expect_column_values_to_not_be_null
+        kwargs:
+          column: transaction_id
+      - expectation_type: expect_column_values_to_be_unique
+        kwargs:
+          column: transaction_id
+      - expectation_type: expect_column_values_to_be_in_set
+        kwargs:
+          column: action
+          value_set: ["BUY", "SELL", "DIVIDEND", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT"]
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: shares
+          min_value: 0
+      - expectation_type: expect_column_values_to_be_between
+        kwargs:
+          column: price
+          min_value: 0.01
+          max_value: 100000

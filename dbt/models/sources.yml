@@ -1,0 +1,120 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Raw data tables for investment analytics
+    tables:
+      - name: raw_market_data
+        description: Real-time and historical market price data
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - not_null
+              - unique
+          - name: symbol
+            description: Stock ticker symbol
+            tests:
+              - not_null
+          - name: price
+            description: Stock price
+            tests:
+              - not_null
+              - dbt_utils.accepted_range:
+                  min_value: 0
+                  max_value: 50000
+          - name: timestamp
+            description: Price timestamp
+            tests:
+              - not_null
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns:
+                - symbol
+                - timestamp
+      
+      - name: raw_portfolio_holdings
+        description: Current portfolio holdings
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - not_null
+              - unique
+          - name: symbol
+            description: Stock ticker symbol
+            tests:
+              - not_null
+          - name: shares
+            description: Number of shares held
+            tests:
+              - not_null
+              - dbt_utils.accepted_range:
+                  min_value: 0
+          - name: avg_cost
+            description: Average cost per share
+            tests:
+              - not_null
+              - dbt_utils.accepted_range:
+                  min_value: 0
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns:
+                - account_id
+                - symbol
+      
+      - name: raw_transactions
+        description: Transaction history
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - not_null
+              - unique
+          - name: transaction_date
+            description: Transaction date
+            tests:
+              - not_null
+          - name: symbol
+            description: Stock ticker symbol
+            tests:
+              - not_null
+          - name: action
+            description: Transaction type
+            tests:
+              - not_null
+              - accepted_values:
+                  values: ['BUY', 'SELL', 'DIVIDEND', 'SPLIT']
+          - name: shares
+            description: Number of shares
+            tests:
+              - not_null
+              - dbt_utils.accepted_range:
+                  min_value: 0
+          - name: price
+            description: Share price
+            tests:
+              - not_null
+              - dbt_utils.accepted_range:
+                  min_value: 0
+      
+      - name: data_quality_checks
+        description: Data quality monitoring results
+        columns:
+          - name: id
+            description: Primary key
+            tests:
+              - not_null
+              - unique
+          - name: table_name
+            description: Table being checked
+            tests:
+              - not_null
+          - name: check_name
+            description: Name of the quality check
+            tests:
+              - not_null
+          - name: check_result
+            description: Whether the check passed
+            tests:
+              - not_null

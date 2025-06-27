@@ -1,0 +1,93 @@
+# Environment Variables
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker
+.docker/
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite3
+
+# Airflow
+airflow/logs/
+airflow/plugins/__pycache__/
+airflow.cfg
+airflow.db
+standalone_admin_password.txt
+
+# dbt
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+
+# Great Expectations
+great_expectations/uncommitted/
+great_expectations/plugins/
+
+# Temporary files
+*.tmp
+*.temp
+
+# API Keys and Credentials (double-check these are not committed)
+*api_key*
+*secret*
+*password*
+credentials.json
