@@ -27,9 +27,9 @@ class DatabaseConnection:
         
         # Fallback to individual components
         # Use container-friendly defaults
-        host = os.getenv('DB_HOST', os.getenv('POSTGRES_HOST', 'localhost'))
+        host = os.getenv('DB_HOST', os.getenv('POSTGRES_HOST', 'postgres'))  # Changed from localhost to postgres for Docker
         port = os.getenv('DB_PORT', os.getenv('POSTGRES_PORT', '5432'))
-        db = os.getenv('DB_NAME', os.getenv('POSTGRES_DB', 'investment_db'))
+        db = os.getenv('DB_NAME', os.getenv('POSTGRES_DB', 'investment_analytics'))  # Changed from investment_db to investment_analytics
         user = os.getenv('DB_USER', os.getenv('POSTGRES_USER', 'postgres'))
         password = os.getenv('DB_PASSWORD', os.getenv('POSTGRES_PASSWORD', 'password'))
         

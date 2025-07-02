@@ -66,7 +66,7 @@ vars:
 
 # Hooks
 on-run-start:
-  - "{{ logging.log_info('Starting dbt run for investment analytics') }}"
+  - "{{ log('Starting dbt run for investment analytics', info=true) }}"
 
 on-run-end:
-  - "{{ logging.log_info('Completed dbt run for investment analytics') }}"
+  - "{{ log('Completed dbt run for investment analytics', info=true) }}"

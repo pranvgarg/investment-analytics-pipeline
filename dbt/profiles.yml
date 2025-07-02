@@ -5,9 +5,9 @@ investment_analytics:
       type: postgres
       host: localhost
       user: postgres
-      password: password
+      password: postgres
       port: 5432
-      dbname: investment_db
+      dbname: investment_analytics
       schema: public
       threads: 4
       keepalives_idle: 0

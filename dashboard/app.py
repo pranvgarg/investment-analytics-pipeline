@@ -10,10 +10,28 @@ from plotly.subplots import make_subplots
 import sys
 import os
 
-# Add the src directory to the Python path
-sys.path.insert(0, '/app/src')
+# Add the project root directory to the Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
-from src.database.connection import get_db_connection
+from src.database.connection import get_db_connection, DatabaseConnection
+import streamlit as st
+
+# Load database connection settings from Streamlit secrets
+db_config = {
+    "host": st.secrets["postgres"]["host"],
+    "port": st.secrets["postgres"]["port"],
+    "dbname": st.secrets["postgres"]["dbname"],
+    "user": st.secrets["postgres"]["user"],
+    "password": st.secrets["postgres"]["password"]
+}
+
+# Create a connection string
+connection_string = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['dbname']}"
+
+# Set environment variables for the database connection
+import os
+os.environ["POSTGRES_URL"] = connection_string
 
 # Page configuration
 st.set_page_config(
@@ -56,7 +74,8 @@ def load_portfolio_data():
 def load_quality_metrics():
     """Load data quality metrics"""
     try:
-        db = get_db_connection()
+        # Explicitly create a database connection with the connection string
+        db = DatabaseConnection(connection_string=connection_string)
         query = """
         SELECT 
             check_name, 
